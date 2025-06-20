@@ -23,7 +23,7 @@ void test_exception_correctness() {
         *ptr = 42; // Trigger exception
         printf("Error: Continued after fault\n");
     } else {
-        printf("Handler %s\n", 
+        printf("Handler %s\n",
                handler_executed ? "executed correctly" : "failed to execute");
     }
 

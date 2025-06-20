@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdatomic.h>
+#include <stdint.h>
 
 #define CACHE_LINE_SIZE 64
 #define NUM_ACCESSES 100000
@@ -16,7 +17,7 @@
  */
 
 // Shared buffer (aligned to cache line)
-volatile uint8_t _Alignas(CACHE_LINE_SIZE) shared_buffer[CACHE_LINE_SIZE];
+volatile uint8_t shared_buffer[CACHE_LINE_SIZE] __attribute__((aligned(CACHE_LINE_SIZE)));
 
 void test_memory_collision_rate() {
     struct timespec start, end;
