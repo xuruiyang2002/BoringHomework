@@ -12,14 +12,11 @@
 
 static atomic_bool start_timing = false;
 static struct timespec raise_time;
-static sigjmp_buf env;
+static jmp_buf env;  // Use normal jmp_buf instead of sigjmp_buf
 
 static atomic_int exception_count = 0;
 static atomic_llong total_latency = 0;
 
-// Measures nanosecond latency between fault and handler
-// Uses monotonic clock for precise timing
-// Directly measures hypervisor trap latency
 static void access_handler(int sig) {
     if (!atomic_load(&start_timing)) return;
 
@@ -29,27 +26,41 @@ static void access_handler(int sig) {
                   (handler_time.tv_nsec - raise_time.tv_nsec);
     atomic_fetch_add(&total_latency, latency);
     atomic_fetch_add(&exception_count, 1);
-    siglongjmp(env, 1); // Escape to safe point
+    longjmp(env, 1);  // Use normal longjmp instead of siglongjmp
 }
 
 void test_exception_response_time() {
     volatile int* ptr = NULL;
     struct sigaction sa;
+
+    // Configure signal handler
     sa.sa_handler = access_handler;
-    sigaction(SIGSEGV, &sa, NULL);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGSEGV, &sa, NULL) == -1) {
+        perror("sigaction failed");
+        return;
+    }
 
     atomic_store(&start_timing, true);
 
     for (int i = 0; i < NUM_SAMPLES; i++) {
-        if (sigsetjmp(env, 1) == 0) {
+        if (setjmp(env) == 0) {
             clock_gettime(CLOCK_MONOTONIC, &raise_time);
-            *ptr = 42; // Trigger exception
+            *ptr = 42;  // Trigger exception
+        } else {
+            // After escaping from handler: unblock SIGSEGV
+            sigset_t set;
+            sigemptyset(&set);
+            sigaddset(&set, SIGSEGV);
+            sigprocmask(SIG_UNBLOCK, &set, NULL);
         }
     }
-    printf("Average exception latency: %lld ns\n", total_latency / exception_count);
-}
 
-int main() {
-    test_exception_response_time();
-    return 0;
+    if (exception_count > 0) {
+        printf("Average exception latency: %lld ns\n",
+               atomic_load(&total_latency) / atomic_load(&exception_count));
+    } else {
+        printf("No exceptions captured!\n");
+    }
 }

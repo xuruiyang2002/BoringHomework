@@ -8,23 +8,39 @@
 #define NUM_TRIGGERS 10000
 
 static atomic_int capture_count = 0;
-static sigjmp_buf env;
+static jmp_buf env;
 
-// Triggers controlled memory access faults
-// Uses signal handler to count captured exceptions
-// Tests hypervisor's ability to trap exceptions
 static void access_handler(int sig) {
     atomic_fetch_add(&capture_count, 1);
-    siglongjmp(env, 1); // Escape to safe point
+    longjmp(env, 1); // Jump to setjmp point
 }
 
 void test_exception_capture() {
     volatile int* ptr = NULL;
-    signal(SIGSEGV, access_handler);
+    struct sigaction sa;
+
+    // Configure signal handler using sigaction
+    sa.sa_handler = access_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    if (sigaction(SIGSEGV, &sa, NULL) == -1) {
+        perror("sigaction");
+        exit(1);
+    }
 
     for (int i = 0; i < NUM_TRIGGERS; i++) {
-        if (sigsetjmp(env, 1) == 0) {
+        if (setjmp(env) == 0) {
+            // Attempt illegal write (triggers SIGSEGV)
             *ptr = 42;
+        } else {
+            // After returning from handler: manually unblock SIGSEGV
+            sigset_t set;
+            sigemptyset(&set);
+            sigaddset(&set, SIGSEGV);
+            if (sigprocmask(SIG_UNBLOCK, &set, NULL) != 0) {
+                perror("sigprocmask");
+                exit(1);
+            }
         }
     }
 
